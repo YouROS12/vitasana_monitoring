@@ -49,11 +49,12 @@ class MassScanner:
         })
         return session
 
-    def scan(self, optimized: bool = False):
+    def scan(self, optimized: bool = False, progress_callback=None):
         """
         Start the recursive scan.
         Args:
             optimized: If True, load prefixes from data/optimized_prefixes.json
+            progress_callback: Optional callback(current_phase, processed_count, total_count)
         """
         logger.info(f"Starting Mass Market Scan (Optimized={optimized})...")
         
@@ -68,6 +69,8 @@ class MassScanner:
                     queue.extend(prefixes)
                 logger.info(f"Loaded {len(queue)} optimized prefixes.")
             except FileNotFoundError:
+                if progress_callback:
+                    progress_callback("Error: optimized_prefixes.json missing", 0, 0)
                 logger.error("Optimized prefixes not found. Run 'cli.py optimize' first.")
                 return
         else:
@@ -76,6 +79,7 @@ class MassScanner:
         visited: Set[str] = set()
         
         total_products = 0
+        total_prefixes = len(queue)
         start_time = time.time()
         
         try:
@@ -87,6 +91,10 @@ class MassScanner:
                     
                 visited.add(prefix)
                 
+                # Update progress
+                if progress_callback:
+                    progress_callback(f"Scanning '{prefix}'", total_products, total_prefixes)
+                
                 try:
                     count = self._process_prefix(prefix)
                     total_products += count
@@ -95,10 +103,10 @@ class MassScanner:
                     if count > 0:
                         self.db.record_scan_prefix(prefix, count)
                     
-                    # Drill down if capped
-                    if count >= MAX_RESULTS:
+                    # Drill down if capped (ONLY in non-optimized mode or if needed)
+                    # In optimized mode, we shouldn't drill down usually, but if we do:
+                    if count >= MAX_RESULTS and not optimized:
                         logger.info(f"Prefix '{prefix}' hit limit ({count}). Expanding...")
-                        # Add longer prefixes to queue
                         for char in self.alphabet:
                             new_prefix = prefix + char
                             queue.append(new_prefix)
@@ -114,6 +122,9 @@ class MassScanner:
             
         duration = time.time() - start_time
         logger.info(f"Scan complete. Processed {len(visited)} prefixes. Upserted {total_products} products in {duration:.2f}s.")
+        
+        if progress_callback:
+            progress_callback("Complete", total_products, total_prefixes)
 
     def _process_prefix(self, prefix: str) -> int:
         """Fetch and persist products for a prefix."""

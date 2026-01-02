@@ -362,7 +362,7 @@ if page == "🎮 Task Runner":
                 monitor_limit = st.number_input(
                     "Product Limit",
                     min_value=0,
-                    value=100,
+                    value=0,
                     step=50,
                     help="Max products to monitor (0 = all)"
                 )

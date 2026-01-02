@@ -30,6 +30,35 @@ def _run_monitoring_task(limit: Optional[int], offset: int, keywords: Optional[L
     _stop_event.clear()
     
     try:
+        # Smart Switching: Use Optimized MassScanner for full scans
+        # Criteria: No keywords, and Limit is None (All) or very large (>2000)
+        use_optimized = (keywords is None) and (limit is None or limit > 2000)
+        
+        if use_optimized:
+             from ...discovery.mass_scanner import MassScanner
+             # Initialize progress
+             tracker._progress.is_running = True
+             tracker._progress.current_phase = "Initializing Optimized Scan"
+             tracker._progress.total_products = 0 # Will update dynamically
+             tracker._progress.products_processed = 0
+             tracker._progress.products_failed = 0
+             
+             scanner = MassScanner()
+             
+             # Adapter to update global progress
+             def progress_adapter(phase, processed, total):
+                 tracker._progress.current_phase = phase
+                 tracker._progress.products_processed = processed # This is 'products upserted'
+                 # We don't really know total products in MassScan until done, but total is prefixes usually
+                 # Let's just update phase text to be descriptive
+                 
+             scanner.scan(optimized=True, progress_callback=progress_adapter)
+             
+             tracker._progress.current_phase = "Complete"
+             tracker._progress.is_running = False
+             return
+
+        # Fallback to Linear Tracker for specific/small scans
         # Get client_id from first credential in config
         creds = config.get('credentials', default=[])
         client_id = creds[0].get('client_id') if creds else ''
