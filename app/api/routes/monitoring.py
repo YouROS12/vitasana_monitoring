@@ -46,11 +46,13 @@ def _run_monitoring_task(limit: Optional[int], offset: int, keywords: Optional[L
              scanner = MassScanner()
              
              # Adapter to update global progress
-             def progress_adapter(phase, processed, total):
+             def progress_adapter(phase, items_found, prefixes_done, prefixes_total):
                  tracker._progress.current_phase = phase
-                 tracker._progress.products_processed = processed # This is 'products upserted'
-                 # We don't really know total products in MassScan until done, but total is prefixes usually
-                 # Let's just update phase text to be descriptive
+                 # Map prefixes to processed/total so the progress bar works
+                 tracker._progress.products_processed = prefixes_done 
+                 tracker._progress.total_products = prefixes_total
+                 # Map items found to updated count
+                 tracker._progress.products_updated = items_found 
                  
              scanner.scan(optimized=True, progress_callback=progress_adapter)
              

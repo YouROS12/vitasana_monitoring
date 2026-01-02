@@ -80,11 +80,13 @@ class MassScanner:
         
         total_products = 0
         total_prefixes = len(queue)
+        prefixes_processed = 0
         start_time = time.time()
         
         try:
             while queue and not self.stop_event.is_set():
                 prefix = queue.popleft()
+                prefixes_processed += 1
                 
                 if prefix in visited or len(prefix) > 5: # Safety depth limit
                     continue
@@ -93,7 +95,7 @@ class MassScanner:
                 
                 # Update progress
                 if progress_callback:
-                    progress_callback(f"Scanning '{prefix}'", total_products, total_prefixes)
+                    progress_callback(f"Scanning '{prefix}'", total_products, prefixes_processed, total_prefixes)
                 
                 try:
                     count = self._process_prefix(prefix)
@@ -124,7 +126,7 @@ class MassScanner:
         logger.info(f"Scan complete. Processed {len(visited)} prefixes. Upserted {total_products} products in {duration:.2f}s.")
         
         if progress_callback:
-            progress_callback("Complete", total_products, total_prefixes)
+            progress_callback("Complete", total_products, prefixes_processed, total_prefixes)
 
     def _process_prefix(self, prefix: str) -> int:
         """Fetch and persist products for a prefix."""
