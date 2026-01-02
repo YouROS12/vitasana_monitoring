@@ -325,6 +325,21 @@ class Database:
             """, (start_time,))
             return [dict(row) for row in cursor.fetchall()]
 
+    def get_stock_history_lite(self, hours: int = 24) -> List[Dict[str, Any]]:
+        """Get minimal history for analysis (No JOINs)."""
+        import datetime
+        start_time = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=hours)).isoformat()
+        
+        with self._connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(f"""
+                SELECT product_sku, stock, timestamp
+                FROM {HISTORY_TABLE}
+                WHERE timestamp >= ?
+                ORDER BY timestamp ASC
+            """, (start_time,))
+            return [dict(row) for row in cursor.fetchall()]
+
     def get_latest_statuses(self) -> List[Dict[str, Any]]:
         """Get the latest monitoring record for each product."""
         with self._connection() as conn:

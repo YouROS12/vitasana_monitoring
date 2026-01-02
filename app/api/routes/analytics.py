@@ -107,7 +107,8 @@ async def get_opportunities(days: int = 7):
     db = get_database()
     
     # 1. Calculate Velocity
-    history_records = db.get_full_history(hours=days*24)
+    # Use optimized lite query (No JOINs)
+    history_records = db.get_stock_history_lite(hours=days*24)
     if not history_records:
         return {"opportunities": [], "count": 0}
         

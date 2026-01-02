@@ -629,7 +629,7 @@ elif page == "📊 Analytics":
         
         try:
             # Direct API call to new endpoint
-            resp = requests.get(f"{API_BASE_URL}/analytics/opportunities?days=7", timeout=10)
+            resp = requests.get(f"{API_BASE_URL}/analytics/opportunities?days=7", timeout=60)
             if resp.status_code == 200:
                 opp_data = resp.json()
                 opps = opp_data.get('opportunities', [])
