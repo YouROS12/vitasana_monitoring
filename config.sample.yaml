@@ -1,0 +1,24 @@
+api:
+  base_url: https://webdash.lacdp.ma
+  login_url: https://webdash.lacdp.ma/login
+  filter_product_url: https://webdash.lacdp.ma/client_dash/filter_product
+  get_product_url: https://webdash.lacdp.ma/client_dash/get_product
+  retry_count: 3
+  retry_delay: 5
+  timeout: 25
+  user_agent: Mozilla/5.0 ...
+
+credentials:
+- name: Account_1
+  username: YOUR_USERNAME
+  password: YOUR_PASSWORD
+  client_id: YOUR_CLIENT_ID
+
+general:
+  database: vitasana.db
+  data_dir: data
+  log_file: vitasana.log
+  log_level: INFO
+
+scheduler:
+  interval_hours: 6

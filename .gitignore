@@ -1,0 +1,19 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Application Data
+data/
+*.db
+*.log
+vitasana.log
+
+# Configuration (Secrets)
+config.yaml
+
+# OS
+.DS_Store
+Thumbs.db
