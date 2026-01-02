@@ -627,9 +627,22 @@ elif page == "📊 Analytics":
         st.header("Gold Mine Opportunities")
         st.info("Ranking Algorithm: Sales Velocity (Units/Day) × Supplier Discount")
         
+        # Date Range Control
+        col_ctrl, _ = st.columns([1, 3])
+        with col_ctrl:
+            days_analyze = st.selectbox(
+                "Analysis Period",
+                options=[3, 7, 14, 30],
+                index=1,
+                format_func=lambda x: f"Last {x} Days",
+                help="Calculate velocity based on this time window."
+            )
+        
         try:
             # Direct API call to new endpoint
-            resp = requests.get(f"{API_BASE_URL}/analytics/opportunities?days=7", timeout=60)
+            with st.spinner(f"Analyzing last {days_analyze} days..."):
+                resp = requests.get(f"{API_BASE_URL}/analytics/opportunities?days={days_analyze}", timeout=60)
+                
             if resp.status_code == 200:
                 opp_data = resp.json()
                 opps = opp_data.get('opportunities', [])
