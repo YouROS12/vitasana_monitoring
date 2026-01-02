@@ -617,113 +617,162 @@ elif page == "🛒 Orders":
     else:
         st.info("No orders found in history. Click 'Sync Now' to fetch.")
 elif page == "📊 Analytics":
-    st.title("📈 Market Pulse")
-    st.markdown("Real-time market intelligence and stock trends.")
+    # Tabs
+    tab_gold, tab_pulse = st.tabs(["💰 Gold Mine", "❤️ Market Pulse"])
     
-    # === Stats & Pulse ===
-    pulse = api_request("GET", "/analytics/pulse", params={"hours": 24})
-    
-    if pulse:
-        stats = pulse.get('stats', {})
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("📦 Monitored Items", f"{stats.get('total_monitored', 0):,}")
-        with col2:
-            st.metric("🔥 24h Movers", f"{stats.get('movers_count', 0)}")
-        with col3:
-            st.metric("⚠️ Low Stock", f"{len(pulse.get('low_stock', []))}")
-        with col4:
-            st.metric("last_updated", "Now")
+    # ---------------------------------------------------------
+    # TAB 1: GOLD MINE OPPORTUNITIES
+    # ---------------------------------------------------------
+    with tab_gold:
+        st.header("Gold Mine Opportunities")
+        st.info("Ranking Algorithm: Sales Velocity (Units/Day) × Supplier Discount")
+        
+        try:
+            # Direct API call to new endpoint
+            resp = requests.get(f"{API_BASE_URL}/analytics/opportunities?days=7", timeout=10)
+            if resp.status_code == 200:
+                opp_data = resp.json()
+                opps = opp_data.get('opportunities', [])
+                
+                if opps:
+                    df_opp = pd.DataFrame(opps)
+                    
+                    st.dataframe(
+                        df_opp,
+                        column_config={
+                            "name": st.column_config.TextColumn("Product", width="large"),
+                            "velocity": st.column_config.NumberColumn("Velocity (Day)", format="%.1f 📦"),
+                            "discount_percent": st.column_config.ProgressColumn(
+                                "Discount %", 
+                                format="%.1f%%", 
+                                min_value=0, 
+                                max_value=100
+                            ),
+                            "price": st.column_config.NumberColumn("Buy Price", format="%.2f MAD"),
+                            "stock": st.column_config.NumberColumn("Stock", help="Current Stock"),
+                            "score": st.column_config.NumberColumn(
+                                "Score", 
+                                help="Higher is better (Velocity * Discount)", 
+                                format="%.1f ⭐️"
+                            )
+                        },
+                        hide_index=True,
+                        use_container_width=True,
+                        height=600
+                    )
+                else:
+                    st.warning("No high-value opportunities found yet. Monitor needs about 2-3 days of data.")
+            else:
+                st.error("Failed to fetch opportunities from API.")
+        except Exception as e:
+            st.error(f"API Connection Error: {e}")
+
+    # ---------------------------------------------------------
+    # TAB 2: MARKET PULSE (Original)
+    # ---------------------------------------------------------
+    with tab_pulse:
+        st.subheader("Real-time Market Pulse")
+        pulse = api_request("GET", "/analytics/pulse", params={"hours": 24})
+        
+        if pulse:
+            stats = pulse.get('stats', {})
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("📦 Monitored Items", f"{stats.get('total_monitored', 0):,}")
+            with col2:
+                st.metric("🔥 24h Movers", f"{stats.get('movers_count', 0)}")
+            with col3:
+                st.metric("⚠️ Low Stock", f"{len(pulse.get('low_stock', []))}")
+            with col4:
+                st.metric("Last Updated", "Now")
+                
+            st.markdown("---")
             
+            # Row 1: Fastest Movers
+            st.subheader("🔥 Fastest Selling Products (Last 24h)")
+            movers = pulse.get('fastest_movers', [])
+            
+            if movers:
+                df_movers = pd.DataFrame(movers)
+                st.dataframe(
+                    df_movers,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "sku": st.column_config.NumberColumn("SKU", width="small"),
+                        "name": st.column_config.TextColumn("Product", width="large"),
+                        "sales_est": st.column_config.ProgressColumn(
+                            "Est. Sales", 
+                            format="%d units",
+                            min_value=0, 
+                            max_value=max([x['sales_est'] for x in movers]) if movers else 100
+                        ),
+                        "start_stock": st.column_config.NumberColumn("Start", width="small"),
+                        "end_stock": st.column_config.NumberColumn("Current", width="small"),
+                        "velocity": st.column_config.TextColumn("Velocity (daily)", width="small"),
+                    }
+                )
+            else:
+                st.info("No significant stock movement detected in the last 24h.")
+                
+            # Row 2: Low Stock
+            st.subheader("⚠️ Low Stock Alert (< 10)")
+            low_stock = pulse.get('low_stock', [])
+            
+            if low_stock:
+                df_low = pd.DataFrame(low_stock)
+                cols = ['sku', 'name', 'stock', 'price', 'last_monitored']
+                df_low = df_low[[c for c in cols if c in df_low.columns]]
+                
+                st.dataframe(
+                    df_low,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "sku": st.column_config.NumberColumn("SKU", width="small"),
+                        "name": st.column_config.TextColumn("Product", width="large"),
+                        "stock": st.column_config.TextColumn("Stock", width="small"),
+                        "price": st.column_config.TextColumn("Price", width="small"),
+                        "last_monitored": st.column_config.TextColumn("Last Checked", width="medium"),
+                    }
+                )
+            else:
+                st.success("No low stock items found.")
+                
+        else:
+            st.warning("Could not load market pulse data.")
+        
         st.markdown("---")
         
-        # === Row 1: Fastest Movers ===
-        st.subheader("🔥 Fastest Selling Products (Last 24h)")
-        movers = pulse.get('fastest_movers', [])
+        # Row 3: Chart
+        st.subheader("📉 Product Stock History")
         
-        if movers:
-            df_movers = pd.DataFrame(movers)
-            st.dataframe(
-                df_movers,
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "sku": st.column_config.NumberColumn("SKU", width="small"),
-                    "name": st.column_config.TextColumn("Product", width="large"),
-                    "sales_est": st.column_config.ProgressColumn(
-                        "Est. Sales", 
-                        format="%d units",
-                        min_value=0, 
-                        max_value=max([x['sales_est'] for x in movers]) if movers else 100
-                    ),
-                    "start_stock": st.column_config.NumberColumn("Start", width="small"),
-                    "end_stock": st.column_config.NumberColumn("Current", width="small"),
-                    "velocity": st.column_config.TextColumn("Velocity (daily)", width="small"),
-                }
-            )
-        else:
-            st.info("No significant stock movement detected in the last 24h.")
-            
-        # === Row 2: Low Stock ===
-        st.subheader("⚠️ Low Stock Alert (< 10)")
-        low_stock = pulse.get('low_stock', [])
-        
-        if low_stock:
-            df_low = pd.DataFrame(low_stock)
-            # Select relevant columns
-            cols = ['sku', 'name', 'stock', 'price', 'last_monitored']
-            df_low = df_low[[c for c in cols if c in df_low.columns]]
-            
-            st.dataframe(
-                df_low,
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "sku": st.column_config.NumberColumn("SKU", width="small"),
-                    "name": st.column_config.TextColumn("Product", width="large"),
-                    "stock": st.column_config.TextColumn("Stock", width="small"),
-                    "price": st.column_config.TextColumn("Price", width="small"),
-                    "last_monitored": st.column_config.TextColumn("Last Checked", width="medium"),
-                }
-            )
-        else:
-            st.success("No low stock items found.")
-            
-    else:
-        st.warning("Could not load market pulse data.")
-    
-    st.markdown("---")
-    
-    # === Row 3: Product History Chart ===
-    st.subheader("📉 Product Stock History")
-    
-    c1, c2 = st.columns([1, 3])
-    with c1:
-        sku_input = st.number_input("Enter SKU to Analyze", min_value=1, value=1, step=1)
-        if st.button("Load Chart", use_container_width=True):
-            history = api_request("GET", f"/products/{sku_input}/history")
-            if history and history.get('history'):
-                st.session_state['chart_data'] = history
-            else:
-                st.session_state['chart_data'] = None
-                st.warning("Product not found or no history.")
-                
-    with c2:
-        if 'chart_data' in st.session_state and st.session_state['chart_data']:
-            h_data = st.session_state['chart_data']
-            st.markdown(f"**{h_data['name']}** (SKU: {h_data['sku']})")
-            
-            df_hist = pd.DataFrame(h_data['history'])
-            if not df_hist.empty:
-                try:
-                    df_hist['timestamp'] = pd.to_datetime(df_hist['timestamp'], format='ISO8601', utc=True)
-                except Exception:
-                    df_hist['timestamp'] = pd.to_datetime(df_hist['timestamp'], errors='coerce', utc=True)
+        c1, c2 = st.columns([1, 3])
+        with c1:
+            sku_input = st.number_input("Enter SKU to Analyze", min_value=1, value=1, step=1)
+            if st.button("Load Chart", use_container_width=True):
+                history = api_request("GET", f"/products/{sku_input}/history")
+                if history and history.get('history'):
+                    st.session_state['chart_data'] = history
+                else:
+                    st.session_state['chart_data'] = None
+                    st.warning("Product not found or no history.")
                     
-                # Line chart
-                st.line_chart(df_hist.set_index('timestamp')['stock'])
-            else:
-                st.info("No data points for chart.")
+        with c2:
+            if 'chart_data' in st.session_state and st.session_state['chart_data']:
+                h_data = st.session_state['chart_data']
+                st.markdown(f"**{h_data['name']}** (SKU: {h_data['sku']})")
+                
+                df_hist = pd.DataFrame(h_data['history'])
+                if not df_hist.empty:
+                    try:
+                        df_hist['timestamp'] = pd.to_datetime(df_hist['timestamp'], format='ISO8601', utc=True)
+                    except Exception:
+                        df_hist['timestamp'] = pd.to_datetime(df_hist['timestamp'], errors='coerce', utc=True)
+                        
+                    st.line_chart(df_hist.set_index('timestamp')['stock'])
+                else:
+                    st.info("No data points for chart.")
 
 
 # ==================== LOGS PAGE ====================
