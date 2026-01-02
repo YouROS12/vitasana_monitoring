@@ -21,4 +21,10 @@ general:
   log_level: INFO
 
 scheduler:
+  mode: "fixed_times"
+  times: 
+    - "08:30"
+    - "12:30"
+    - "16:00"
+    - "19:30"
   interval_hours: 6

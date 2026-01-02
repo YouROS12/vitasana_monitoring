@@ -1,6 +1,6 @@
 """
 Market Monitor Scheduler.
-Runs the Mass Scanner in monitoring mode periodically (e.g. every 6 hours).
+Runs the Mass Scanner in monitoring mode periodically or at fixed times.
 """
 
 import time
@@ -16,19 +16,57 @@ logger = logging.getLogger(__name__)
 class MarketScheduler:
     def __init__(self):
         self.config = get_config()
-        self.interval_hours = self.config.get_int('scheduler', 'interval_hours', default=6)
         self.stop_event = threading.Event()
         
+    def _get_next_run(self) -> datetime:
+        """Calculate the next run time based on config."""
+        mode = self.config.get('scheduler', 'mode', default='interval')
+        now = datetime.now()
+        
+        if mode == 'fixed_times':
+            times_list = self.config.get('scheduler', 'times')
+            if not times_list:
+                # Default fallback slots
+                times_list = ["08:30", "12:30", "16:00", "19:30"]
+                
+            candidates = []
+            today_str = now.strftime('%Y-%m-%d')
+            
+            for t_str in times_list:
+                try:
+                    dt = datetime.strptime(f"{today_str} {t_str}", "%Y-%m-%d %H:%M")
+                    candidates.append(dt)
+                except ValueError:
+                    logger.error(f"Invalid time format in config: {t_str}")
+            
+            candidates.sort()
+            
+            # Find next slot today
+            for cand in candidates:
+                if cand > now:
+                    return cand
+            
+            # If no more slots today, pick first slot tomorrow
+            if candidates:
+                tomorrow = now + timedelta(days=1)
+                first = candidates[0]
+                return first.replace(year=tomorrow.year, month=tomorrow.month, day=tomorrow.day)
+                
+            # Fallback if list empty
+            return now + timedelta(hours=6)
+            
+        else:
+            # Interval mode
+            interval = self.config.get_int('scheduler', 'interval_hours', default=6)
+            return now + timedelta(hours=interval)
+
     def run(self):
         """Start the scheduler loop."""
-        logger.info(f"Starting Market Scheduler (Interval: {self.interval_hours} hours)")
-        
-        # Run immediately on start? Yes, user probably wants feedback.
-        self._run_job()
+        mode = self.config.get('scheduler', 'mode', default='interval')
+        logger.info(f"Starting Market Scheduler (Mode: {mode})")
         
         while not self.stop_event.is_set():
-            # rigorous wait loop to allow interruption
-            next_run = datetime.now() + timedelta(hours=self.interval_hours)
+            next_run = self._get_next_run()
             logger.info(f"Next scan scheduled for {next_run.strftime('%Y-%m-%d %H:%M:%S')}")
             
             while datetime.now() < next_run and not self.stop_event.is_set():
@@ -42,7 +80,6 @@ class MarketScheduler:
         try:
             logger.info(f"Starting scheduled scan at {datetime.now()}")
             scanner = MassScanner()
-            # Use optimized mode by default for monitoring
             scanner.scan(optimized=True)
             logger.info("Scheduled scan complete.")
         except Exception as e:
