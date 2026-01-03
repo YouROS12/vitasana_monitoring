@@ -79,6 +79,21 @@ class MarketScheduler:
         """Execute the monitoring scan."""
         try:
             logger.info(f"Starting scheduled scan at {datetime.now()}")
+            
+            # PHASE 1: REFRESH AUTHENTICATION
+            # Force a fresh login to update config.yaml with valid cookies
+            try:
+                from ..auth.session import create_auth_session_from_config
+                auth = create_auth_session_from_config()
+                logger.info("Refreshing session cookies...")
+                if auth.refresh_cookies():
+                    logger.info("Authentication refreshed successfully.")
+                else:
+                    logger.warning("Cookie refresh returned False - checking credentials might be needed.")
+            except Exception as e:
+                logger.error(f"Auth refresh failed: {e}")
+            
+            # PHASE 2: RUN SCANNER
             scanner = MassScanner()
             scanner.scan(optimized=True)
             logger.info("Scheduled scan complete.")
