@@ -11,7 +11,7 @@ router = APIRouter()
 async def test_telegram():
     """Test Telegram notification connectivity."""
     try:
-        from ..services.telegram import create_notifier_from_config
+        from app.services.telegram import create_notifier_from_config
         
         notifier = create_notifier_from_config()
         
@@ -48,7 +48,7 @@ async def test_telegram():
 async def get_notification_status():
     """Get current notification configuration status."""
     try:
-        from ..services.telegram import create_notifier_from_config
+        from app.services.telegram import create_notifier_from_config
         
         notifier = create_notifier_from_config()
         
