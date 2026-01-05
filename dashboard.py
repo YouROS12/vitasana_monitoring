@@ -621,60 +621,84 @@ elif page == "📊 Analytics":
     tab_gold, tab_pulse = st.tabs(["💰 Gold Mine", "❤️ Market Pulse"])
     
     # ---------------------------------------------------------
-    # TAB 1: GOLD MINE OPPORTUNITIES
+    # TAB 1: GOLD MINE OPPORTUNITIES (v2 - MAD Based)
     # ---------------------------------------------------------
     with tab_gold:
-        st.header("Gold Mine Opportunities")
-        st.info("Ranking Algorithm: Sales Velocity (Units/Day) × Supplier Discount")
+        st.header("💰 Gold Mine Opportunities")
+        st.info("**New Algorithm:** Daily Profit Potential = Velocity × Margin (MAD)")
         
-        # Date Range Control
-        col_ctrl, _ = st.columns([1, 3])
-        with col_ctrl:
+        # Filters Row
+        col1, col2, col3 = st.columns(3)
+        with col1:
             days_analyze = st.selectbox(
-                "Analysis Period",
+                "📅 Analysis Period",
                 options=[3, 7, 14, 30],
                 index=1,
-                format_func=lambda x: f"Last {x} Days",
-                help="Calculate velocity based on this time window."
+                format_func=lambda x: f"Last {x} Days"
+            )
+        with col2:
+            min_price = st.number_input(
+                "💰 Min Selling Price (MAD)",
+                min_value=0,
+                value=50,
+                step=10,
+                help="Exclude cheap products below this price"
+            )
+        with col3:
+            min_margin = st.number_input(
+                "📊 Min Margin (MAD)",
+                min_value=0,
+                value=10,
+                step=5,
+                help="Exclude low-margin products"
             )
         
         try:
-            # Direct API call to new endpoint
             with st.spinner(f"Analyzing last {days_analyze} days..."):
-                resp = requests.get(f"{API_BASE_URL}/analytics/opportunities?days={days_analyze}", timeout=60)
+                url = f"{API_BASE_URL}/analytics/opportunities?days={days_analyze}&min_price={min_price}&min_margin={min_margin}"
+                resp = requests.get(url, timeout=60)
                 
             if resp.status_code == 200:
                 opp_data = resp.json()
                 opps = opp_data.get('opportunities', [])
                 
                 if opps:
+                    st.success(f"Found **{len(opps)}** high-value opportunities!")
+                    
                     df_opp = pd.DataFrame(opps)
                     
                     st.dataframe(
                         df_opp,
                         column_config={
+                            "sku": st.column_config.NumberColumn("SKU", width="small"),
                             "name": st.column_config.TextColumn("Product", width="large"),
-                            "velocity": st.column_config.NumberColumn("Velocity (Day)", format="%.1f 📦"),
-                            "discount_percent": st.column_config.ProgressColumn(
+                            "selling_price": st.column_config.NumberColumn("Sell Price", format="%.2f MAD"),
+                            "buying_price": st.column_config.NumberColumn("Buy Price", format="%.2f MAD"),
+                            "margin_mad": st.column_config.NumberColumn(
+                                "Margin (MAD)", 
+                                format="%.2f MAD",
+                                help="Selling Price - Buying Price"
+                            ),
+                            "discount_pct": st.column_config.ProgressColumn(
                                 "Discount %", 
                                 format="%.1f%%", 
                                 min_value=0, 
-                                max_value=100
+                                max_value=60
                             ),
-                            "price": st.column_config.NumberColumn("Buy Price", format="%.2f MAD"),
-                            "stock": st.column_config.NumberColumn("Stock", help="Current Stock"),
-                            "score": st.column_config.NumberColumn(
-                                "Score", 
-                                help="Higher is better (Velocity * Discount)", 
-                                format="%.1f ⭐️"
-                            )
+                            "velocity": st.column_config.NumberColumn("Units/Day", format="%.1f 📦"),
+                            "daily_profit": st.column_config.NumberColumn(
+                                "Daily Profit 💵", 
+                                format="%.2f MAD",
+                                help="Velocity × Margin = Potential daily profit"
+                            ),
+                            "stock": st.column_config.NumberColumn("Stock", help="Current Stock")
                         },
                         hide_index=True,
                         use_container_width=True,
                         height=600
                     )
                 else:
-                    st.warning("No high-value opportunities found yet. Monitor needs about 2-3 days of data.")
+                    st.warning("No opportunities match your filters. Try lowering the thresholds.")
             else:
                 st.error("Failed to fetch opportunities from API.")
         except Exception as e:

@@ -96,34 +96,34 @@ async def get_market_pulse(hours: int = 24):
         }
     }
 @router.get("/opportunities")
-async def get_opportunities(days: int = 7):
+async def get_opportunities(days: int = 7, min_price: float = 0, min_margin: float = 0):
     """
-    Get 'Gold Mine' opportunities: High Velocity + High Discount.
-    Algorithm:
-    1. Calculate Sales Velocity (Units/Day) from last N days history (ignoring restocks).
-    2. Get current Discount % from latest status.
-    3. Score = Velocity * Discount.
+    Get 'Gold Mine' opportunities: High Velocity + High Margin VALUE.
+    
+    New Algorithm (v2):
+    1. Calculate Sales Velocity (Units/Day) from last N days history.
+    2. Calculate Margin MAD = Selling Price - Buying Price (price - final_price).
+    3. Daily Profit Potential = Velocity × Margin MAD.
+    
+    Filters:
+    - min_price: Exclude products below this selling price
+    - min_margin: Exclude products with margin below this MAD value
     """
     db = get_database()
     
     # 1. Calculate Velocity
-    # Use optimized lite query (No JOINs)
     history_records = db.get_stock_history_lite(hours=days*24)
     if not history_records:
         return {"opportunities": [], "count": 0}
         
     df = pd.DataFrame(history_records)
     
-    # robust timestamp
     try:
         df['timestamp'] = pd.to_datetime(df['timestamp'], format='ISO8601', utc=True)
     except:
         df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce', utc=True)
         
     df = df.sort_values(['product_sku', 'timestamp'])
-    
-    # Group by SKU and calculate differences
-    # We want sum of (prev - curr) where prev > curr
     
     velocity_map = {}
     
@@ -132,57 +132,72 @@ async def get_opportunities(days: int = 7):
             continue
             
         group = group.sort_values('timestamp')
-        
-        # Calculate diffs: shift(1) is previous row
-        # stock_diff = prev - curr
         group['prev_stock'] = group['stock'].shift(1)
         group['diff'] = group['prev_stock'] - group['stock']
         
-        # Sales are positive diffs. Restocks are negative diffs.
+        # Sales = sum of positive diffs (drops)
         sales = group[group['diff'] > 0]['diff'].sum()
-        
-        # Daily velocity
         daily_v = sales / days
         if daily_v > 0:
             velocity_map[sku] = daily_v
     
-    # 2. Get Margin Info
+    # 2. Get Latest Product Info (prices, discounts)
     latest = db.get_latest_statuses()
     
-    # 3. Rank Opportunities
+    # 3. Calculate & Rank Opportunities
     results = []
     
     for item in latest:
-        sku = item['sku'] # database.py returns 'sku' column
+        sku = item['sku']
         velocity = velocity_map.get(sku, 0.0)
         
-        if velocity <= 0.1: # Eliminate things selling less than 1 every 10 days
+        if velocity <= 0.1:  # Min velocity threshold
             continue
-            
-        discount = float(item.get('discount_percent') or 0)
-        final_price = float(item.get('final_price') or 0)
+        
+        # Price fields:
+        # - 'price' = Selling Price (what customer pays, before any discount logic)
+        # - 'final_price' = Buying Price (what you pay supplier after their discount)
+        selling_price = float(item.get('price') or 0)
+        buying_price = float(item.get('final_price') or 0)
+        discount_pct = float(item.get('discount_percent') or 0)
         stock = int(item.get('stock') or 0)
         
-        # Score Logic
-        score = velocity * discount
+        # Skip if no valid prices
+        if selling_price <= 0 or buying_price <= 0:
+            continue
         
-        # Only meaningful opportunities
-        if score > 0.5: 
+        # Calculate Margin in MAD
+        margin_mad = selling_price - buying_price
+        
+        # Apply filters
+        if selling_price < min_price:
+            continue
+        if margin_mad < min_margin:
+            continue
+        
+        # NEW SCORE: Daily Profit Potential
+        daily_profit = velocity * margin_mad
+        
+        # Only include meaningful opportunities (min 1 MAD/day potential)
+        if daily_profit >= 1.0:
             results.append({
                 "sku": sku,
                 "name": item['name'],
-                "velocity": round(velocity, 2), # units/day
-                "discount_percent": round(discount, 1),
-                "price": final_price,
-                "stock": stock,
-                "score": round(score, 1)
+                "selling_price": round(selling_price, 2),
+                "buying_price": round(buying_price, 2),
+                "margin_mad": round(margin_mad, 2),
+                "discount_pct": round(discount_pct, 1),
+                "velocity": round(velocity, 2),
+                "daily_profit": round(daily_profit, 2),
+                "stock": stock
             })
-            
-    # Sort DESC by Score
-    results.sort(key=lambda x: x['score'], reverse=True)
+    
+    # Sort by Daily Profit Potential (DESC)
+    results.sort(key=lambda x: x['daily_profit'], reverse=True)
     
     return {
         "count": len(results),
         "days_analyzed": days,
-        "opportunities": results[:100] # Top 100
+        "filters": {"min_price": min_price, "min_margin": min_margin},
+        "opportunities": results[:100]
     }
