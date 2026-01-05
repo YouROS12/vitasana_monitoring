@@ -105,17 +105,28 @@ class MarketScheduler:
             if self._should_run_discovery():
                 self._run_discovery_job()
             
+            # Check for daily summary
+            if self._should_send_daily_summary():
+                self._send_daily_summary()
+            
             next_run = self._get_next_run()
             logger.info(f"Next scan scheduled for {next_run.strftime('%Y-%m-%d %H:%M:%S')}")
             
             while datetime.now() < next_run and not self.stop_event.is_set():
-                time.sleep(1)
+                time.sleep(60)  # Check every minute instead of every second
+                
                 # Re-check for discovery during wait
                 if self._should_run_discovery():
                     self._run_discovery_job()
                 
+                # Check for daily summary during wait
+                if self._should_send_daily_summary():
+                    self._send_daily_summary()
+                
             if not self.stop_event.is_set():
                 self._run_job()
+                # Sync orders after each monitoring scan
+                self._sync_orders_and_notify()
                 
     def _run_job(self):
         """Execute the monitoring scan (optimized, uses prefix list)."""
@@ -191,6 +202,137 @@ class MarketScheduler:
                 logger.info(f"Saved {len(prefixes)} optimized prefixes to {output_path}")
         except Exception as e:
             logger.error(f"Prefix optimization failed: {e}")
+
+    def _sync_orders_and_notify(self):
+        """Sync orders from WooCommerce and notify on new orders."""
+        try:
+            from ..core.database import get_database
+            from ..orders.woocommerce import WooCommerceClient
+            from app.services.telegram import create_notifier_from_config
+            
+            db = get_database()
+            notifier = create_notifier_from_config()
+            
+            # Get existing order numbers before sync
+            existing_orders = set()
+            try:
+                history = db.get_orders_history(limit=100)
+                existing_orders = {o.get('number') for o in history if o.get('number')}
+            except:
+                pass
+            
+            # Sync new orders
+            try:
+                woo = WooCommerceClient()
+                orders = woo.get_orders(status='processing', limit=20)
+                
+                new_orders = []
+                for order in orders:
+                    order_num = str(order.get('number', order.get('id')))
+                    if order_num not in existing_orders:
+                        new_orders.append(order)
+                        # Save to DB
+                        db.save_order(order)
+                
+                # Notify about new orders
+                if new_orders and notifier.enabled:
+                    for order in new_orders:
+                        billing = order.get('billing', {})
+                        customer = f"{billing.get('first_name', '')} {billing.get('last_name', '')}".strip() or "Guest"
+                        city = billing.get('city', 'Unknown')
+                        total = order.get('total', '0')
+                        items = order.get('line_items', [])
+                        item_count = sum(item.get('quantity', 1) for item in items)
+                        
+                        message = f"""
+🛒 <b>NEW ORDER #{order.get('number', order.get('id'))}</b>
+
+👤 Customer: {customer}
+📍 City: {city}
+📦 Items: {item_count}
+💰 Total: {total} MAD
+"""
+                        notifier.send_message(message)
+                    
+                    logger.info(f"Notified about {len(new_orders)} new orders")
+                    
+            except Exception as e:
+                logger.error(f"Order sync failed: {e}")
+                
+        except Exception as e:
+            logger.error(f"Order notification error: {e}")
+
+    def _should_send_daily_summary(self) -> bool:
+        """Check if daily summary should be sent."""
+        now = datetime.now()
+        summary_time = self.config.get('notifications', 'daily_summary_time', default='20:00')
+        
+        try:
+            hour, minute = map(int, summary_time.split(':'))
+            # Check if it's the summary time (within 5 minutes window)
+            if now.hour == hour and now.minute >= minute and now.minute < minute + 5:
+                # Check if already sent today
+                if hasattr(self, '_last_summary_date') and self._last_summary_date == now.date():
+                    return False
+                return True
+        except:
+            pass
+        return False
+
+    def _send_daily_summary(self):
+        """Send daily summary notification."""
+        try:
+            from ..core.database import get_database
+            from app.services.telegram import create_notifier_from_config
+            
+            self._last_summary_date = datetime.now().date()
+            
+            db = get_database()
+            notifier = create_notifier_from_config()
+            
+            if not notifier.enabled:
+                return
+            
+            # Gather stats
+            try:
+                # Products monitored
+                products = db.get_all_products()
+                product_count = len(products) if products else 0
+                
+                # Today's orders
+                orders = db.get_orders_history(limit=50)
+                today = datetime.now().date()
+                todays_orders = [o for o in orders if o.get('date_created', '').startswith(str(today))]
+                order_count = len(todays_orders)
+                order_total = sum(float(o.get('total_amount', 0) or 0) for o in todays_orders)
+                
+                # Top movers (from history)
+                # Just count products with recent activity
+                history = db.get_full_history(hours=24)
+                active_skus = len(set(h.get('product_sku') for h in history)) if history else 0
+                
+            except Exception as e:
+                logger.error(f"Error gathering summary stats: {e}")
+                product_count = 0
+                order_count = 0
+                order_total = 0
+                active_skus = 0
+            
+            message = f"""
+📊 <b>DAILY SUMMARY - {datetime.now().strftime('%d/%m/%Y')}</b>
+
+🛒 Orders Today: <b>{order_count}</b>
+💰 Revenue: <b>{order_total:.2f} MAD</b>
+📦 Products Monitored: {product_count:,}
+🔥 Active Products (24h): {active_skus}
+
+Good night! 🌙
+"""
+            notifier.send_message(message)
+            logger.info("Daily summary sent")
+            
+        except Exception as e:
+            logger.error(f"Daily summary error: {e}")
             
     def stop(self):
         """Stop the scheduler."""
