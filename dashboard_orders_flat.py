@@ -38,57 +38,71 @@ elif page == "🛒 Orders":
     if orders:
         st.markdown(f"### Recent Orders ({len(orders)})")
         
-        flat_data = []
+        # Build one row per ORDER (not per item)
+        order_rows = []
         for order in orders:
-            customer = order.get('billing', {})
-            cust_name = f"{customer.get('first_name','')} {customer.get('last_name','')}".strip() or "Guest"
+            billing = order.get('billing', {})
+            cust_name = f"{billing.get('first_name','')} {billing.get('last_name','')}".strip() or "Guest"
+            city = billing.get('city', '-')
             
-            # Order color indicator
+            # Fulfillment indicator
             fulfill = order.get('fulfillability', 'unknown')
             status_symbol = {'ready': '✅', 'partial': '⚠️', 'out_of_stock': '❌'}.get(fulfill, '❓')
             
-            for item in order['items']:
-                qty_ordered = item['quantity']
-                qty_avail = item.get('available_qty', 0)
-                progress = min(1.0, qty_avail / qty_ordered) if qty_ordered > 0 else 0
-                
-                flat_data.append({
-                    "Order": f"{status_symbol} #{order['number']}",
-                    "Date": order['date_created'].split('T')[0],
-                    "Customer": cust_name,
-                    "Product": item['name'],
-                    "Qty": qty_ordered,
-                    "Stock": qty_avail,
-                    "Availability": progress,
-                    "Item Status": item.get('stock_status', 'unknown'),
-                    "Match": item.get('match_status', 'none')
-                })
+            # Count items
+            items = order.get('items', [])
+            item_count = sum(item.get('quantity', 1) for item in items)
+            
+            order_rows.append({
+                "Status": status_symbol,
+                "Order #": order.get('number', '-'),
+                "Date": order.get('date_created', '').split('T')[0],
+                "Customer": cust_name,
+                "City": city,
+                "Items": item_count,
+                "Total": f"{order.get('total_amount', 0):.2f} MAD",
+                "Fulfillability": fulfill.capitalize() if fulfill else "Unknown"
+            })
         
-        if flat_data:
-            df = pd.DataFrame(flat_data)
+        if order_rows:
+            df = pd.DataFrame(order_rows)
             st.dataframe(
                 df,
                 use_container_width=True,
                 hide_index=True,
                 column_config={
-                    "Order": st.column_config.TextColumn("Order", width="small"),
+                    "Status": st.column_config.TextColumn("", width="small"),
+                    "Order #": st.column_config.TextColumn("Order #", width="small"),
                     "Date": st.column_config.TextColumn("Date", width="small"),
                     "Customer": st.column_config.TextColumn("Customer", width="medium"),
-                    "Product": st.column_config.TextColumn("Product", width="large"),
-                    "Qty": st.column_config.NumberColumn("Qty", width="small"),
-                    "Stock": st.column_config.NumberColumn("Stock", width="small"),
-                    "Availability": st.column_config.ProgressColumn(
-                        "Availability",
-                        format="%.0f%%",
-                        min_value=0,
-                        max_value=1,
-                    ),
-                    "Item Status": st.column_config.TextColumn("Status", width="small"),
-                    "Match": st.column_config.TextColumn("Match", width="small"),
+                    "City": st.column_config.TextColumn("City", width="medium"),
+                    "Items": st.column_config.NumberColumn("Items", width="small"),
+                    "Total": st.column_config.TextColumn("Total", width="small"),
+                    "Fulfillability": st.column_config.TextColumn("Status", width="small")
                 }
             )
+            
+            # Order details expander
+            st.markdown("---")
+            st.subheader("Order Details")
+            order_numbers = [o.get('number') for o in orders]
+            selected_order = st.selectbox("Select order to view details:", order_numbers)
+            
+            if selected_order:
+                order_data = next((o for o in orders if o.get('number') == selected_order), None)
+                if order_data and order_data.get('items'):
+                    item_rows = []
+                    for item in order_data['items']:
+                        item_rows.append({
+                            "Product": item.get('name', 'Unknown'),
+                            "Qty": item.get('quantity', 0),
+                            "Stock": item.get('available_qty', 0),
+                            "Status": item.get('stock_status', 'unknown'),
+                            "Match": item.get('match_status', 'none')
+                        })
+                    st.dataframe(pd.DataFrame(item_rows), use_container_width=True, hide_index=True)
         else:
-            st.info("No items found in orders.")
+            st.info("No orders data.")
             
     else:
         st.info("No orders found in history. Click 'Sync Now' to fetch.")
