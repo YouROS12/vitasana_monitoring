@@ -518,16 +518,43 @@ class Database:
     def upsert_product_from_search(self, data: Dict[str, Any]) -> bool:
         """
         Upsert a product from Mass Scanner search result.
-        Maps fields correctly (stock_1 -> stock).
+        Maps fields correctly and saves ALL pricing data.
         """
         sku = int(data.get('sku') or data.get('id'))
         name = data.get('name', 'Unknown')
         image = data.get('images', None)
         desc = data.get('description', None)
         
-        # Parse stock and price
-        stock = int(data.get('stock_1', 0))
-        price = float(data.get('regular_price', 0))
+        # Parse stock and ALL price fields
+        stock = int(data.get('stock_1') or data.get('stock') or 0)
+        price = float(data.get('regular_price') or data.get('price') or 0)
+        
+        # Get discount and final price (CRITICAL for Gold Mine)
+        discount = data.get('discount')
+        final_price = data.get('final_price')
+        points = data.get('points')
+        
+        # Parse discount percentage
+        discount_percent = None
+        if discount is not None:
+            try:
+                discount_percent = float(discount)
+            except (ValueError, TypeError):
+                pass
+        
+        # Parse final_price
+        if final_price is not None:
+            try:
+                final_price = float(final_price)
+            except (ValueError, TypeError):
+                final_price = None
+        
+        # Parse points
+        if points is not None:
+            try:
+                points = int(points)
+            except (ValueError, TypeError):
+                points = None
         
         with self._connection() as conn:
             cursor = conn.cursor()
@@ -543,12 +570,13 @@ class Database:
                     last_checked_at=CURRENT_TIMESTAMP
             """, (sku, name, image, desc))
             
-            # Record History
+            # Record History with FULL pricing data
             cursor.execute(f"""
                 INSERT INTO {HISTORY_TABLE} 
-                (product_sku, timestamp, stock, price, availability)
-                VALUES (?, CURRENT_TIMESTAMP, ?, ?, ?)
-            """, (sku, stock, price, 'In Stock' if stock > 0 else 'Out of Stock'))
+                (product_sku, timestamp, stock, price, discount_percent, final_price, availability, points)
+                VALUES (?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?)
+            """, (sku, stock, price, discount_percent, final_price, 
+                  'In Stock' if stock > 0 else 'Out of Stock', points))
             
             return True
 _db_instance: Optional[Database] = None
