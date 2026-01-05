@@ -15,7 +15,7 @@ if str(project_root) not in sys.path:
 from app.core.config import get_config
 from app.core.logging import setup_logging
 from app.core.database import get_database
-from app.api.routes import health, products, discovery, monitoring, orders, analytics
+from app.api.routes import health, products, discovery, monitoring, orders, analytics, notifications
 
 # Initialize logging
 config = get_config()
@@ -52,6 +52,7 @@ app.include_router(discovery.router, prefix="/api")
 app.include_router(monitoring.router, prefix="/api")
 app.include_router(orders.router, prefix="/api")
 app.include_router(analytics.router, prefix="/api/analytics", tags=["analytics"])
+app.include_router(notifications.router, prefix="/api/notifications", tags=["notifications"])
 
 
 @app.get("/")
