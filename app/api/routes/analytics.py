@@ -98,87 +98,109 @@ async def get_market_pulse(hours: int = 24):
 @router.get("/opportunities")
 async def get_opportunities(days: int = 7, min_price: float = 0, min_margin: float = 0):
     """
-    Get 'Gold Mine' opportunities: High Velocity + High Margin VALUE.
+    Get 'Gold Mine' opportunities: High Velocity + High Margin VALUE + Trend.
     
-    New Algorithm (v2):
-    1. Calculate Sales Velocity (Units/Day) from last N days history.
-    2. Calculate Margin MAD = Selling Price - Buying Price (price - final_price).
-    3. Daily Profit Potential = Velocity × Margin MAD.
-    
-    Filters:
-    - min_price: Exclude products below this selling price
-    - min_margin: Exclude products with margin below this MAD value
+    Algorithm (v3):
+    1. Calculate Sales Velocity for CURRENT period (last N days)
+    2. Calculate Sales Velocity for PREVIOUS period (N to 2N days ago)
+    3. Calculate Margin MAD = Selling Price - Buying Price
+    4. Daily Profit = Velocity × Margin MAD
+    5. Trend = Compare current vs previous velocity
     """
     db = get_database()
     
-    # 1. Calculate Velocity
-    history_records = db.get_stock_history_lite(hours=days*24)
-    if not history_records:
+    # Helper function to calculate velocity from history
+    def calc_velocity_map(history_records, num_days):
+        if not history_records:
+            return {}
+        df = pd.DataFrame(history_records)
+        try:
+            df['timestamp'] = pd.to_datetime(df['timestamp'], format='ISO8601', utc=True)
+        except:
+            df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce', utc=True)
+        df = df.sort_values(['product_sku', 'timestamp'])
+        
+        velocity_map = {}
+        for sku, group in df.groupby('product_sku'):
+            if len(group) < 2:
+                continue
+            group = group.sort_values('timestamp')
+            group['prev_stock'] = group['stock'].shift(1)
+            group['diff'] = group['prev_stock'] - group['stock']
+            sales = group[group['diff'] > 0]['diff'].sum()
+            daily_v = sales / num_days
+            if daily_v > 0:
+                velocity_map[sku] = daily_v
+        return velocity_map
+    
+    # Get CURRENT period velocity (last N days)
+    current_history = db.get_stock_history_lite(hours=days*24)
+    velocity_current = calc_velocity_map(current_history, days)
+    
+    # Get PREVIOUS period velocity (N to 2N days ago)
+    # We fetch 2N days, then filter to only the older half
+    full_history = db.get_stock_history_lite(hours=days*24*2)
+    if full_history:
+        df_full = pd.DataFrame(full_history)
+        try:
+            df_full['timestamp'] = pd.to_datetime(df_full['timestamp'], format='ISO8601', utc=True)
+        except:
+            df_full['timestamp'] = pd.to_datetime(df_full['timestamp'], errors='coerce', utc=True)
+        
+        cutoff = pd.Timestamp.now(tz='UTC') - pd.Timedelta(days=days)
+        prev_records = df_full[df_full['timestamp'] < cutoff].to_dict('records')
+        velocity_prev = calc_velocity_map(prev_records, days) if prev_records else {}
+    else:
+        velocity_prev = {}
+    
+    if not velocity_current:
         return {"opportunities": [], "count": 0}
-        
-    df = pd.DataFrame(history_records)
     
-    try:
-        df['timestamp'] = pd.to_datetime(df['timestamp'], format='ISO8601', utc=True)
-    except:
-        df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce', utc=True)
-        
-    df = df.sort_values(['product_sku', 'timestamp'])
-    
-    velocity_map = {}
-    
-    for sku, group in df.groupby('product_sku'):
-        if len(group) < 2:
-            continue
-            
-        group = group.sort_values('timestamp')
-        group['prev_stock'] = group['stock'].shift(1)
-        group['diff'] = group['prev_stock'] - group['stock']
-        
-        # Sales = sum of positive diffs (drops)
-        sales = group[group['diff'] > 0]['diff'].sum()
-        daily_v = sales / days
-        if daily_v > 0:
-            velocity_map[sku] = daily_v
-    
-    # 2. Get Latest Product Info (prices, discounts)
+    # Get Latest Product Info
     latest = db.get_latest_statuses()
     
-    # 3. Calculate & Rank Opportunities
+    # Calculate & Rank Opportunities
     results = []
     
     for item in latest:
         sku = item['sku']
-        velocity = velocity_map.get(sku, 0.0)
+        velocity = velocity_current.get(sku, 0.0)
+        prev_velocity = velocity_prev.get(sku, 0.0)
         
-        if velocity <= 0.1:  # Min velocity threshold
+        if velocity <= 0.1:
             continue
         
-        # Price fields:
-        # - 'price' = Selling Price (what customer pays, before any discount logic)
-        # - 'final_price' = Buying Price (what you pay supplier after their discount)
         selling_price = float(item.get('price') or 0)
         buying_price = float(item.get('final_price') or 0)
         discount_pct = float(item.get('discount_percent') or 0)
         stock = int(item.get('stock') or 0)
         
-        # Skip if no valid prices
         if selling_price <= 0 or buying_price <= 0:
             continue
         
-        # Calculate Margin in MAD
         margin_mad = selling_price - buying_price
         
-        # Apply filters
         if selling_price < min_price:
             continue
         if margin_mad < min_margin:
             continue
         
-        # NEW SCORE: Daily Profit Potential
         daily_profit = velocity * margin_mad
         
-        # Only include meaningful opportunities (min 1 MAD/day potential)
+        # Calculate Trend
+        if prev_velocity > 0:
+            change_pct = ((velocity - prev_velocity) / prev_velocity) * 100
+            if change_pct > 10:
+                trend = "↑"
+            elif change_pct < -10:
+                trend = "↓"
+            else:
+                trend = "→"
+        else:
+            # New product or no previous data
+            trend = "🆕"
+            change_pct = 0
+        
         if daily_profit >= 1.0:
             results.append({
                 "sku": sku,
@@ -188,11 +210,12 @@ async def get_opportunities(days: int = 7, min_price: float = 0, min_margin: flo
                 "margin_mad": round(margin_mad, 2),
                 "discount_pct": round(discount_pct, 1),
                 "velocity": round(velocity, 2),
+                "trend": trend,
+                "trend_pct": round(change_pct, 1),
                 "daily_profit": round(daily_profit, 2),
                 "stock": stock
             })
     
-    # Sort by Daily Profit Potential (DESC)
     results.sort(key=lambda x: x['daily_profit'], reverse=True)
     
     return {

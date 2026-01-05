@@ -667,6 +667,16 @@ elif page == "📊 Analytics":
                     
                     df_opp = pd.DataFrame(opps)
                     
+                    # CSV Export Button
+                    csv_data = df_opp.to_csv(index=False).encode('utf-8')
+                    st.download_button(
+                        label="📥 Download CSV",
+                        data=csv_data,
+                        file_name=f"gold_mine_{days_analyze}d.csv",
+                        mime="text/csv",
+                        help="Download the full results as CSV"
+                    )
+                    
                     st.dataframe(
                         df_opp,
                         column_config={
@@ -675,23 +685,24 @@ elif page == "📊 Analytics":
                             "selling_price": st.column_config.NumberColumn("Sell Price", format="%.2f MAD"),
                             "buying_price": st.column_config.NumberColumn("Buy Price", format="%.2f MAD"),
                             "margin_mad": st.column_config.NumberColumn(
-                                "Margin (MAD)", 
-                                format="%.2f MAD",
-                                help="Selling Price - Buying Price"
+                                "Margin", 
+                                format="%.2f MAD"
                             ),
-                            "discount_pct": st.column_config.ProgressColumn(
-                                "Discount %", 
-                                format="%.1f%%", 
-                                min_value=0, 
-                                max_value=60
+                            "velocity": st.column_config.NumberColumn("Units/Day", format="%.1f"),
+                            "trend": st.column_config.TextColumn(
+                                "Trend",
+                                help="↑ Rising, ↓ Falling, → Stable, 🆕 New"
                             ),
-                            "velocity": st.column_config.NumberColumn("Units/Day", format="%.1f 📦"),
+                            "trend_pct": st.column_config.NumberColumn(
+                                "Δ%",
+                                format="%.1f%%",
+                                help="Change vs previous period"
+                            ),
                             "daily_profit": st.column_config.NumberColumn(
                                 "Daily Profit 💵", 
-                                format="%.2f MAD",
-                                help="Velocity × Margin = Potential daily profit"
+                                format="%.2f MAD"
                             ),
-                            "stock": st.column_config.NumberColumn("Stock", help="Current Stock")
+                            "stock": st.column_config.NumberColumn("Stock")
                         },
                         hide_index=True,
                         use_container_width=True,
