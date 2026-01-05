@@ -280,10 +280,11 @@ class MarketScheduler:
         return False
 
     def _send_daily_summary(self):
-        """Send daily summary notification."""
+        """Send daily summary notification with top products."""
         try:
             from ..core.database import get_database
             from app.services.telegram import create_notifier_from_config
+            import pandas as pd
             
             self._last_summary_date = datetime.now().date()
             
@@ -293,30 +294,104 @@ class MarketScheduler:
             if not notifier.enabled:
                 return
             
-            # Gather stats
+            # Gather basic stats
             try:
-                # Products monitored
                 products = db.get_all_products()
                 product_count = len(products) if products else 0
                 
-                # Today's orders
                 orders = db.get_orders_history(limit=50)
                 today = datetime.now().date()
                 todays_orders = [o for o in orders if o.get('date_created', '').startswith(str(today))]
                 order_count = len(todays_orders)
                 order_total = sum(float(o.get('total_amount', 0) or 0) for o in todays_orders)
                 
-                # Top movers (from history)
-                # Just count products with recent activity
-                history = db.get_full_history(hours=24)
-                active_skus = len(set(h.get('product_sku') for h in history)) if history else 0
-                
             except Exception as e:
                 logger.error(f"Error gathering summary stats: {e}")
                 product_count = 0
                 order_count = 0
                 order_total = 0
-                active_skus = 0
+            
+            # Get top 10 Gold Mine (by daily profit)
+            gold_mine_text = ""
+            try:
+                history = db.get_stock_history_lite(hours=7*24)
+                latest = db.get_latest_statuses()
+                
+                if history and latest:
+                    df = pd.DataFrame(history)
+                    df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce', utc=True)
+                    df = df.sort_values(['product_sku', 'timestamp'])
+                    
+                    velocity_map = {}
+                    for sku, group in df.groupby('product_sku'):
+                        if len(group) >= 2:
+                            group = group.sort_values('timestamp')
+                            group['prev_stock'] = group['stock'].shift(1)
+                            group['diff'] = group['prev_stock'] - group['stock']
+                            sales = group[group['diff'] > 0]['diff'].sum()
+                            if sales > 0:
+                                velocity_map[sku] = sales / 7
+                    
+                    gold_products = []
+                    for item in latest:
+                        sku = item['sku']
+                        velocity = velocity_map.get(sku, 0)
+                        price = float(item.get('price') or 0)
+                        final = float(item.get('final_price') or 0)
+                        margin = price - final if final > 0 else 0
+                        daily_profit = velocity * margin
+                        
+                        if daily_profit >= 10:
+                            gold_products.append({
+                                'name': item['name'][:30],
+                                'profit': daily_profit
+                            })
+                    
+                    gold_products.sort(key=lambda x: x['profit'], reverse=True)
+                    top_gold = gold_products[:10]
+                    
+                    if top_gold:
+                        gold_mine_text = "\n\n<b>💰 TOP 10 GOLD MINE</b>\n"
+                        for i, p in enumerate(top_gold, 1):
+                            gold_mine_text += f"{i}. {p['name']} - {p['profit']:.0f} MAD/day\n"
+                            
+            except Exception as e:
+                logger.error(f"Gold Mine calc failed: {e}")
+            
+            # Get top 10 Market Pulse (by velocity/24h)
+            pulse_text = ""
+            try:
+                history_24h = db.get_stock_history_lite(hours=24)
+                if history_24h:
+                    df24 = pd.DataFrame(history_24h)
+                    df24['timestamp'] = pd.to_datetime(df24['timestamp'], errors='coerce', utc=True)
+                    df24 = df24.sort_values(['product_sku', 'timestamp'])
+                    
+                    movers = []
+                    for sku, group in df24.groupby('product_sku'):
+                        if len(group) >= 2:
+                            start_stock = group.iloc[0]['stock']
+                            end_stock = group.iloc[-1]['stock']
+                            drop = start_stock - end_stock
+                            if drop > 0:
+                                name = latest_map.get(sku, {}).get('name', f'SKU {sku}') if 'latest_map' in dir() else f'SKU {sku}'
+                                # Get name from latest
+                                for item in latest:
+                                    if item['sku'] == sku:
+                                        name = item['name'][:30]
+                                        break
+                                movers.append({'name': name, 'units': int(drop)})
+                    
+                    movers.sort(key=lambda x: x['units'], reverse=True)
+                    top_movers = movers[:10]
+                    
+                    if top_movers:
+                        pulse_text = "\n\n<b>🔥 TOP 10 MOVERS (24h)</b>\n"
+                        for i, m in enumerate(top_movers, 1):
+                            pulse_text += f"{i}. {m['name']} - {m['units']} units\n"
+                            
+            except Exception as e:
+                logger.error(f"Market Pulse calc failed: {e}")
             
             message = f"""
 📊 <b>DAILY SUMMARY - {datetime.now().strftime('%d/%m/%Y')}</b>
@@ -324,8 +399,7 @@ class MarketScheduler:
 🛒 Orders Today: <b>{order_count}</b>
 💰 Revenue: <b>{order_total:.2f} MAD</b>
 📦 Products Monitored: {product_count:,}
-🔥 Active Products (24h): {active_skus}
-
+{gold_mine_text}{pulse_text}
 Good night! 🌙
 """
             notifier.send_message(message)
