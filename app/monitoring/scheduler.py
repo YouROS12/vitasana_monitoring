@@ -207,7 +207,7 @@ class MarketScheduler:
         """Sync orders from WooCommerce and notify on new orders."""
         try:
             from ..core.database import get_database
-            from ..orders.woocommerce import WooCommerceClient
+            from ..orders.client import WooCommerceClient
             from app.services.telegram import create_notifier_from_config
             
             db = get_database()
@@ -223,7 +223,16 @@ class MarketScheduler:
             
             # Sync new orders
             try:
-                woo = WooCommerceClient()
+                wc_conf = self.config.get('woocommerce', default={})
+                if not wc_conf.get('url') or not wc_conf.get('consumer_key'):
+                    logger.warning("WooCommerce config missing, skipping sync")
+                    return
+
+                woo = WooCommerceClient(
+                    url=wc_conf['url'],
+                    consumer_key=wc_conf['consumer_key'],
+                    consumer_secret=wc_conf['consumer_secret']
+                )
                 orders = woo.get_orders(status='processing', limit=20)
                 
                 new_orders = []
@@ -296,7 +305,7 @@ class MarketScheduler:
             
             # Gather basic stats
             try:
-                products = db.get_all_products()
+                products = db.get_latest_statuses()
                 product_count = len(products) if products else 0
                 
                 orders = db.get_orders_history(limit=50)
