@@ -465,7 +465,7 @@ class Database:
         with self._connection() as conn:
             cursor = conn.cursor()
             query = f"""
-                SELECT o.*, c.first_name, c.last_name, c.email 
+                SELECT o.*, c.first_name, c.last_name, c.email, c.phone
                 FROM {ORDERS_TABLE} o
                 LEFT JOIN {CUSTOMERS_TABLE} c ON o.customer_id = c.id
             """

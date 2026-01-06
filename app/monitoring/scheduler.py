@@ -287,7 +287,8 @@ class MarketScheduler:
                         billing = order.get('billing', {})
                         customer = f"{billing.get('first_name', '')} {billing.get('last_name', '')}".strip() or "Guest"
                         city = billing.get('city', 'Unknown')
-                        total = order.get('total_amount', 0) # OrderService standardizes this key
+                        phone = billing.get('phone', 'Unknown')
+                        total = order.get('total_amount', 0)
                         items = order.get('items', [])
                         item_count = sum(item.get('quantity', 1) for item in items)
                         
@@ -296,6 +297,7 @@ class MarketScheduler:
 
 👤 Customer: {customer}
 📍 City: {city}
+📞 Phone: {phone}
 📦 Items: {item_count}
 💰 Total: {total:.2f} MAD
 """
@@ -333,12 +335,10 @@ class MarketScheduler:
             from app.services.telegram import create_notifier_from_config
             import pandas as pd
             
-            self._last_discovery_date = None
-            self._last_summary_date = None
-            self._last_analysis_date = None
+            self._last_summary_date = datetime.now().date()
             
-            # Load optimized prefixes
-            self.optimized_prefixes = self._load_optimized_prefixes()
+            db = get_database()
+            notifier = create_notifier_from_config()
             
             if not notifier.enabled:
                 return

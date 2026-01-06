@@ -61,6 +61,7 @@ def test_alert():
     
     msg = f"{icon} <b>Nouvelle Commande #{o['number']}</b>\n"
     msg += f"👤 {o.get('first_name', '')} {o.get('last_name', '')}\n"
+    msg += f"📞 {o.get('phone', 'Unknown')}\n"
     msg += f"💰 {o['total_amount']} MAD\n"
     msg += f"📦 Status: <b>{fulfillability.upper().replace('_', ' ')}</b>\n\n"
     
