@@ -207,41 +207,32 @@ class MarketScheduler:
         """Sync orders from WooCommerce and notify on new orders."""
         try:
             from ..core.database import get_database
-            from ..orders.client import WooCommerceClient
+            from app.orders.service import OrderService
             from app.services.telegram import create_notifier_from_config
             
             db = get_database()
             notifier = create_notifier_from_config()
             
-            # Get existing order numbers before sync
+            # Get existing order numbers before sync to identify new ones
             existing_orders = set()
             try:
                 history = db.get_orders_history(limit=100)
-                existing_orders = {o.get('number') for o in history if o.get('number')}
+                existing_orders = {str(o.get('number')) for o in history if o.get('number')}
             except:
                 pass
             
-            # Sync new orders
+            # Sync orders using OrderService (handles persistence correctly)
             try:
-                wc_conf = self.config.get('woocommerce', default={})
-                if not wc_conf.get('url') or not wc_conf.get('consumer_key'):
-                    logger.warning("WooCommerce config missing, skipping sync")
-                    return
-
-                woo = WooCommerceClient(
-                    url=wc_conf['url'],
-                    consumer_key=wc_conf['consumer_key'],
-                    consumer_secret=wc_conf['consumer_secret']
-                )
-                orders = woo.get_orders(status='processing', limit=20)
+                service = OrderService()
+                # We skip live check (check_stock=False) for speed in the scheduler background job
+                # The dashboard can do live checks when viewed
+                synced_orders = service.sync_orders(status='processing', check_stock=False)
                 
                 new_orders = []
-                for order in orders:
-                    order_num = str(order.get('number', order.get('id')))
+                for order in synced_orders:
+                    order_num = str(order.get('number'))
                     if order_num not in existing_orders:
                         new_orders.append(order)
-                        # Save to DB
-                        db.save_order(order)
                 
                 # Notify about new orders
                 if new_orders and notifier.enabled:
@@ -249,17 +240,17 @@ class MarketScheduler:
                         billing = order.get('billing', {})
                         customer = f"{billing.get('first_name', '')} {billing.get('last_name', '')}".strip() or "Guest"
                         city = billing.get('city', 'Unknown')
-                        total = order.get('total', '0')
-                        items = order.get('line_items', [])
+                        total = order.get('total_amount', 0) # OrderService standardizes this key
+                        items = order.get('items', [])
                         item_count = sum(item.get('quantity', 1) for item in items)
                         
                         message = f"""
-🛒 <b>NEW ORDER #{order.get('number', order.get('id'))}</b>
+🛒 <b>NEW ORDER #{order.get('number')}</b>
 
 👤 Customer: {customer}
 📍 City: {city}
 📦 Items: {item_count}
-💰 Total: {total} MAD
+💰 Total: {total:.2f} MAD
 """
                         notifier.send_message(message)
                     
