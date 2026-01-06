@@ -98,14 +98,12 @@ async def get_market_pulse(hours: int = 24):
 @router.get("/opportunities")
 async def get_opportunities(days: int = 7, min_price: float = 0, min_margin: float = 0):
     """
-    Get 'Gold Mine' opportunities: High Velocity + High Margin VALUE + Trend.
+    Get 'Gold Mine' opportunities: Top Selling Products (High Velocity).
     
-    Algorithm (v3):
+    Algorithm (v4):
     1. Calculate Sales Velocity for CURRENT period (last N days)
-    2. Calculate Sales Velocity for PREVIOUS period (N to 2N days ago)
-    3. Calculate Margin MAD = Selling Price - Buying Price
-    4. Daily Profit = Velocity × Margin MAD
-    5. Trend = Compare current vs previous velocity
+    2. Rank purely by Velocity (Highest Sales Volume)
+    3. Include Margin and Trend for context
     """
     db = get_database()
     
@@ -167,7 +165,7 @@ async def get_opportunities(days: int = 7, min_price: float = 0, min_margin: flo
         velocity = velocity_current.get(sku, 0.0)
         prev_velocity = velocity_prev.get(sku, 0.0)
         
-        if velocity <= 0.1:
+        if velocity <= 0:
             continue
         
         selling_price = float(item.get('price') or 0)
@@ -175,14 +173,12 @@ async def get_opportunities(days: int = 7, min_price: float = 0, min_margin: flo
         discount_pct = float(item.get('discount_percent') or 0)
         stock = int(item.get('stock') or 0)
         
-        if selling_price <= 0 or buying_price <= 0:
-            continue
-        
         margin_mad = selling_price - buying_price
         
-        if selling_price < min_price:
+        # Apply user filters if provided, but don't hard filter otherwise
+        if min_price > 0 and selling_price < min_price:
             continue
-        if margin_mad < min_margin:
+        if min_margin > 0 and margin_mad < min_margin:
             continue
         
         daily_profit = velocity * margin_mad
@@ -201,22 +197,22 @@ async def get_opportunities(days: int = 7, min_price: float = 0, min_margin: flo
             trend = "🆕"
             change_pct = 0
         
-        if daily_profit >= 1.0:
-            results.append({
-                "sku": sku,
-                "name": item['name'],
-                "selling_price": round(selling_price, 2),
-                "buying_price": round(buying_price, 2),
-                "margin_mad": round(margin_mad, 2),
-                "discount_pct": round(discount_pct, 1),
-                "velocity": round(velocity, 2),
-                "trend": trend,
-                "trend_pct": round(change_pct, 1),
-                "daily_profit": round(daily_profit, 2),
-                "stock": stock
-            })
+        results.append({
+            "sku": sku,
+            "name": item['name'],
+            "selling_price": round(selling_price, 2),
+            "buying_price": round(buying_price, 2),
+            "margin_mad": round(margin_mad, 2),
+            "discount_pct": round(discount_pct, 1),
+            "velocity": round(velocity, 2),
+            "trend": trend,
+            "trend_pct": round(change_pct, 1),
+            "daily_profit": round(daily_profit, 2),
+            "stock": stock
+        })
     
-    results.sort(key=lambda x: x['daily_profit'], reverse=True)
+    # SORT BY VELOCITY (TOP SELLING)
+    results.sort(key=lambda x: x['velocity'], reverse=True)
     
     return {
         "count": len(results),

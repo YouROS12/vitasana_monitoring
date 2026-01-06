@@ -621,11 +621,11 @@ elif page == "📊 Analytics":
     tab_gold, tab_pulse = st.tabs(["💰 Gold Mine", "❤️ Market Pulse"])
     
     # ---------------------------------------------------------
-    # TAB 1: GOLD MINE OPPORTUNITIES (v2 - MAD Based)
+    # TAB 1: GOLD MINE OPPORTUNITIES
     # ---------------------------------------------------------
     with tab_gold:
-        st.header("💰 Gold Mine Opportunities")
-        st.info("**New Algorithm:** Daily Profit Potential = Velocity × Margin (MAD)")
+        st.header("💰 Top Selling Products")
+        st.info("Ranking based on Sales Velocity (Units sold per day)")
         
         # Filters Row
         col1, col2, col3 = st.columns(3)
@@ -640,17 +640,17 @@ elif page == "📊 Analytics":
             min_price = st.number_input(
                 "💰 Min Selling Price (MAD)",
                 min_value=0,
-                value=50,
+                value=0, # Optional by default
                 step=10,
-                help="Exclude cheap products below this price"
+                help="Optional: Filter by minimum price"
             )
         with col3:
             min_margin = st.number_input(
                 "📊 Min Margin (MAD)",
                 min_value=0,
-                value=10,
+                value=0, # Optional by default
                 step=5,
-                help="Exclude low-margin products"
+                help="Optional: Filter by minimum profit margin"
             )
         
         try:
