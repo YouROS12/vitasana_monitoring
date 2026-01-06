@@ -20,7 +20,13 @@ class MarketScheduler:
     def __init__(self):
         self.config = get_config()
         self.stop_event = threading.Event()
-        self.last_discovery_date = None  # Track when discovery last ran
+        self.last_discovery_date = None
+        self._last_discovery_date = None
+        self._last_summary_date = None
+        self._last_analysis_date = None
+        
+        # Load optimized prefixes
+        self.optimized_prefixes = self._load_optimized_prefixes()
         
     def _get_next_run(self) -> datetime:
         """Calculate the next run time based on config."""
@@ -95,15 +101,56 @@ class MarketScheduler:
         
         return True
 
+    def _should_run_analysis(self) -> bool:
+        """Check if analysis should run (e.g., at 04:00)."""
+        now = datetime.now()
+        target_str = self.config.get('analysis', 'daily_time', default='04:00')
+        
+        try:
+            target_time = datetime.strptime(target_str, '%H:%M').time()
+            if now.time() >= target_time and (not self._last_analysis_date or self._last_analysis_date < now.date()):
+                return True
+            return False
+        except ValueError:
+            return False
+
+    def _run_analysis_job(self):
+        """Run the heavy analytics job."""
+        try:
+            from app.analysis.engine import GoldMineAnalyzer
+            logger.info("Running scheduled analytics...")
+            
+            analyzer = GoldMineAnalyzer()
+            analyzer.run_full_analysis()
+            
+            self._last_analysis_date = datetime.now().date()
+            logger.info("Analytics job complete.")
+            
+        except Exception as e:
+            logger.error(f"Analytics job failed: {e}")
+
     def run(self):
         """Start the scheduler loop."""
         mode = self.config.get('scheduler', 'mode', default='interval')
         logger.info(f"Starting Market Scheduler (Mode: {mode})")
         
+        # Initial Check: Run analysis if missing
+        try:
+            from pathlib import Path
+            if not Path("data/analytics/gold_mine_latest.json").exists():
+                logger.info("No analytics found. Running initial analysis...")
+                self._run_analysis_job()
+        except Exception:
+            pass
+        
         while not self.stop_event.is_set():
-            # Check for weekly discovery first
+            # Check for weekly discovery
             if self._should_run_discovery():
                 self._run_discovery_job()
+            
+            # Check for daily analysis
+            if self._should_run_analysis():
+                self._run_analysis_job()
             
             # Check for daily summary
             if self._should_send_daily_summary():
@@ -113,19 +160,19 @@ class MarketScheduler:
             logger.info(f"Next scan scheduled for {next_run.strftime('%Y-%m-%d %H:%M:%S')}")
             
             while datetime.now() < next_run and not self.stop_event.is_set():
-                time.sleep(60)  # Check every minute instead of every second
+                time.sleep(60) 
                 
-                # Re-check for discovery during wait
                 if self._should_run_discovery():
                     self._run_discovery_job()
-                
-                # Check for daily summary during wait
+                    
+                if self._should_run_analysis():
+                    self._run_analysis_job()
+                    
                 if self._should_send_daily_summary():
                     self._send_daily_summary()
                 
             if not self.stop_event.is_set():
                 self._run_job()
-                # Sync orders after each monitoring scan
                 self._sync_orders_and_notify()
                 
     def _run_job(self):
@@ -286,10 +333,12 @@ class MarketScheduler:
             from app.services.telegram import create_notifier_from_config
             import pandas as pd
             
-            self._last_summary_date = datetime.now().date()
+            self._last_discovery_date = None
+            self._last_summary_date = None
+            self._last_analysis_date = None
             
-            db = get_database()
-            notifier = create_notifier_from_config()
+            # Load optimized prefixes
+            self.optimized_prefixes = self._load_optimized_prefixes()
             
             if not notifier.enabled:
                 return

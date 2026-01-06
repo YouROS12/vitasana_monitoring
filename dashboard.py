@@ -653,67 +653,93 @@ elif page == "📊 Analytics":
                 help="Optional: Filter by minimum profit margin"
             )
         
-        try:
-            with st.spinner(f"Analyzing last {days_analyze} days..."):
-                url = f"{API_BASE_URL}/analytics/opportunities?days={days_analyze}&min_price={min_price}&min_margin={min_margin}"
-                resp = requests.get(url, timeout=60)
+        # Try to load pre-calculated data
+        data_file = Path("data/analytics/gold_mine_latest.json")
+        analyzed_data = {}
+        timestamp = "Unknown"
+        
+        if data_file.exists():
+            try:
+                with open(data_file, 'r', encoding='utf-8') as f:
+                    file_content = json.load(f)
+                    analyzed_data = file_content.get('periods', {})
+                    timestamp = file_content.get('timestamp', 'Unknown')
+                    # Parse timestamp for display
+                    try:
+                        ts = datetime.fromisoformat(timestamp)
+                        timestamp = ts.strftime("%Y-%m-%d %H:%M")
+                    except:
+                        pass
+            except Exception as e:
+                st.error(f"Error loading analytics: {e}")
+        
+        st.caption(f"Last Updated: {timestamp}")
+        
+        # Get data for selected period
+        opps = analyzed_data.get(str(days_analyze), [])
+        
+        # Apply Filters (in memory)
+        if opps:
+            df_opp = pd.DataFrame(opps)
+            
+            # Filter by Price
+            if min_price > 0:
+                df_opp = df_opp[df_opp['selling_price'] >= min_price]
+            
+            # Filter by Margin
+            if min_margin > 0:
+                df_opp = df_opp[df_opp['margin_mad'] >= min_margin]
+            
+            # Show results
+            if not df_opp.empty:
+                st.success(f"Found **{len(df_opp)}** high-value opportunities!")
                 
-            if resp.status_code == 200:
-                opp_data = resp.json()
-                opps = opp_data.get('opportunities', [])
+                # CSV Export Button
+                csv_data = df_opp.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Download CSV",
+                    data=csv_data,
+                    file_name=f"gold_mine_{days_analyze}d.csv",
+                    mime="text/csv",
+                    help="Download the full results as CSV"
+                )
                 
-                if opps:
-                    st.success(f"Found **{len(opps)}** high-value opportunities!")
-                    
-                    df_opp = pd.DataFrame(opps)
-                    
-                    # CSV Export Button
-                    csv_data = df_opp.to_csv(index=False).encode('utf-8')
-                    st.download_button(
-                        label="📥 Download CSV",
-                        data=csv_data,
-                        file_name=f"gold_mine_{days_analyze}d.csv",
-                        mime="text/csv",
-                        help="Download the full results as CSV"
-                    )
-                    
-                    st.dataframe(
-                        df_opp,
-                        column_config={
-                            "sku": st.column_config.NumberColumn("SKU", width="small"),
-                            "name": st.column_config.TextColumn("Product", width="large"),
-                            "selling_price": st.column_config.NumberColumn("Sell Price", format="%.2f MAD"),
-                            "buying_price": st.column_config.NumberColumn("Buy Price", format="%.2f MAD"),
-                            "margin_mad": st.column_config.NumberColumn(
-                                "Margin", 
-                                format="%.2f MAD"
-                            ),
-                            "velocity": st.column_config.NumberColumn("Units/Day", format="%.1f"),
-                            "trend": st.column_config.TextColumn(
-                                "Trend",
-                                help="↑ Rising, ↓ Falling, → Stable, 🆕 New"
-                            ),
-                            "trend_pct": st.column_config.NumberColumn(
-                                "Δ%",
-                                format="%.1f%%",
-                                help="Change vs previous period"
-                            ),
-                            "daily_profit": st.column_config.NumberColumn(
-                                "Daily Profit 💵", 
-                                format="%.2f MAD"
-                            ),
-                            "stock": st.column_config.NumberColumn("Stock")
-                        },
-                        hide_index=True,
-                        use_container_width=True,
-                        height=600
-                    )
-                else:
-                    st.warning("No opportunities match your filters. Try lowering the thresholds.")
+                st.dataframe(
+                    df_opp,
+                    column_config={
+                        "sku": st.column_config.NumberColumn("SKU", width="small"),
+                        "name": st.column_config.TextColumn("Product", width="large"),
+                        "selling_price": st.column_config.NumberColumn("Sell Price", format="%.2f MAD"),
+                        "buying_price": st.column_config.NumberColumn("Buy Price", format="%.2f MAD"),
+                        "margin_mad": st.column_config.NumberColumn(
+                            "Margin", 
+                            format="%.2f MAD"
+                        ),
+                        "velocity": st.column_config.NumberColumn("Units/Day", format="%.1f"),
+                        "trend": st.column_config.TextColumn(
+                            "Trend",
+                            help="↑ Rising, ↓ Falling, → Stable, 🆕 New"
+                        ),
+                        "trend_pct": st.column_config.NumberColumn(
+                            "Δ%",
+                            format="%.1f%%",
+                            help="Change vs previous period"
+                        ),
+                        "daily_profit": st.column_config.NumberColumn(
+                            "Daily Profit 💵", 
+                            format="%.2f MAD"
+                        ),
+                        "stock": st.column_config.NumberColumn("Stock")
+                    },
+                    hide_index=True,
+                    use_container_width=True,
+                    height=600
+                )
             else:
-                st.error("Failed to fetch opportunities from API.")
-        except Exception as e:
-            st.error(f"API Connection Error: {e}")
+                st.warning("No opportunities match your filters. Try lowering the thresholds.")
+        else:
+            st.info("No analysis data available yet. It runs daily at 04:00 AM.")
+            st.markdown("Run the scheduler to generate initial data.")
 
     # ---------------------------------------------------------
     # TAB 2: MARKET PULSE (Original)
