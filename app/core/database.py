@@ -570,7 +570,27 @@ class Database:
                     last_checked_at=CURRENT_TIMESTAMP
             """, (sku, name, image, desc))
             
-            # Record History with FULL pricing data
+            # CRITICAL FIX: If final_price is missing (Mass Scanner doesn't return it),
+            # try to get it from the last known calibration/monitoring record.
+            if final_price is None:
+                cursor.execute(f"""
+                    SELECT final_price, discount_percent, price 
+                    FROM {HISTORY_TABLE} 
+                    WHERE product_sku = ? 
+                    ORDER BY timestamp DESC 
+                    LIMIT 1
+                """, (sku,))
+                row = cursor.fetchone()
+                if row:
+                    # Keep previous pricing if available
+                    final_price = row['final_price']
+                    if discount_percent is None:
+                        discount_percent = row['discount_percent']
+                    # Also keep regular price if missing/zero (though usually present)
+                    if price <= 0 and row['price']:
+                        price = row['price']
+            
+            # Record History with FULL pricing data (merged with historic if needed)
             cursor.execute(f"""
                 INSERT INTO {HISTORY_TABLE} 
                 (product_sku, timestamp, stock, price, discount_percent, final_price, availability, points)
