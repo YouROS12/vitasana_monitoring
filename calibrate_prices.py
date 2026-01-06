@@ -1,8 +1,8 @@
 
 """
 Price Calibration Script.
-Finds products with missing "Buying Price" (final_price) and fetches them from the Detail API.
-Run this periodically or once to fix "0 MAD" prices in Gold Mine.
+1. FAST: Repairs '0 MAD' prices by copying data from older history records.
+2. SLOW: Fetches missing prices from the API for products that have NO history.
 """
 
 import logging
@@ -20,12 +20,67 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def get_missing_price_skus(db):
-    """Find SKUs that have never had a valid final_price."""
-    # Logic: Get all SKUs, check if they have ANY history record with final_price > 0
-    # or just check the latest status.
+def repair_from_history(db):
+    """
+    Repair latest records that have missing price by looking at older records.
+    Returns count of fixed records.
+    """
+    logger.info("🔧 Attempting to repair prices from history...")
     
-    # Efficient query: Products EXCEPT Products with known price
+    with db._connection() as conn:
+        cursor = conn.cursor()
+        
+        # 1. Get all SKUs with latest price = 0 or NULL
+        # querying latest record for each SKU
+        cursor.execute(f"""
+            WITH Latest AS (
+                SELECT product_sku, timestamp,
+                       ROW_NUMBER() OVER (PARTITION BY product_sku ORDER BY timestamp DESC) as rn
+                FROM {HISTORY_TABLE}
+            )
+            SELECT product_sku, timestamp 
+            FROM Latest 
+            WHERE rn = 1 
+            AND product_sku IN (
+                SELECT product_sku FROM {HISTORY_TABLE} 
+                GROUP BY product_sku 
+                HAVING MAX(final_price) > 0  -- Only try if there is valid history
+            )
+        """)
+        
+        candidates = cursor.fetchall()
+        logger.info(f"Found {len(candidates)} products with valid history but broken latest status.")
+        
+        fixed_count = 0
+        
+        for sku, latest_ts in candidates:
+            # Find last GOOD price
+            cursor.execute(f"""
+                SELECT final_price, price, discount_percent 
+                FROM {HISTORY_TABLE}
+                WHERE product_sku = ? AND final_price > 0
+                ORDER BY timestamp DESC
+                LIMIT 1
+            """, (sku,))
+            
+            good_data = cursor.fetchone()
+            
+            if good_data:
+                # Update the BAD latest record
+                cursor.execute(f"""
+                    UPDATE {HISTORY_TABLE}
+                    SET final_price = ?,
+                        price = ?,
+                        discount_percent = ?
+                    WHERE product_sku = ? AND timestamp = ?
+                """, (good_data['final_price'], good_data['price'], good_data['discount_percent'], sku, latest_ts))
+                fixed_count += 1
+                
+        conn.commit()
+        return fixed_count
+
+def get_missing_price_skus(db):
+    """Find SKUs that have NEVER had a valid final_price."""
     query = f"""
         SELECT sku, name FROM {PRODUCTS_TABLE}
         WHERE sku NOT IN (
@@ -41,19 +96,23 @@ def get_missing_price_skus(db):
 
 def calibrate():
     db = get_database()
+    
+    # PHASE 1: REPAIR FROM DB (Instant)
+    repaired = repair_from_history(db)
+    logger.info(f"✅ Repaired {repaired} products using history data.")
+    
+    # PHASE 2: API FETCH (Slow, for completely new/never-scanned items)
     config = get_config()
     auth = create_auth_session_from_config()
     
-    logger.info("Checking for products with missing prices...")
     products = get_missing_price_skus(db)
     
     if not products:
-        logger.info("✅ All products have pricing data. No calibration needed.")
+        logger.info("✅ All products have pricing data. finished.")
         return
 
-    logger.info(f"🔍 Found {len(products)} products with missing prices.")
-    logger.info("Starting calibration (this may take time)...")
-
+    logger.info(f"🔍 Found {len(products)} products that have NEVER been priced. Fetching from API...")
+    
     # Auth
     session_config = auth.get_session_config()
     if not session_config:
@@ -74,7 +133,6 @@ def calibrate():
     failed = 0
     
     # Thread Pool
-    # Be gentle with the API
     max_workers = 3 
     
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
