@@ -25,8 +25,7 @@ class MarketScheduler:
         self._last_summary_date = None
         self._last_analysis_date = None
         
-        # Load optimized prefixes
-        self.optimized_prefixes = self._load_optimized_prefixes()
+        self._last_analysis_date = None
         
     def _get_next_run(self) -> datetime:
         """Calculate the next run time based on config."""
