@@ -283,6 +283,7 @@ class MarketScheduler:
                 
                 # Notify about new orders
                 if new_orders and notifier.enabled:
+                    logger.info(f"Found {len(new_orders)} new orders to notify.") 
                     for order in new_orders:
                         billing = order.get('billing', {})
                         customer = f"{billing.get('first_name', '')} {billing.get('last_name', '')}".strip() or "Guest"

@@ -39,7 +39,7 @@ class OrderService:
         else:
             logger.warning("WooCommerce config missing")
 
-    def sync_orders(self, status: str = 'processing', check_stock: bool = True) -> List[Dict[str, Any]]:
+    def sync_orders(self, status: str = 'processing', check_stock: bool = False) -> List[Dict[str, Any]]:
         """
         1. Fetch orders
         2. Match items to generic products
