@@ -170,10 +170,12 @@ class MarketScheduler:
                     
                 if self._should_send_daily_summary():
                     self._send_daily_summary()
+                    
+                # Run order sync frequently (every minute)
+                self._sync_orders_and_notify()
                 
             if not self.stop_event.is_set():
                 self._run_job()
-                self._sync_orders_and_notify()
                 
     def _run_job(self):
         """Execute the monitoring scan (optimized, uses prefix list)."""
