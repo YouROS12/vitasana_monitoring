@@ -261,25 +261,23 @@ class MarketScheduler:
             db = get_database()
             notifier = create_notifier_from_config()
             
-            # Get existing order numbers before sync to identify new ones
-            existing_orders = set()
+            # Get existing order IDs (processing only) BEFORE sync to identify new ones
+            existing_ids = set()
             try:
-                history = db.get_orders_history(limit=100)
-                existing_orders = {str(o.get('number')) for o in history if o.get('number')}
-            except:
-                pass
+                existing_ids = db.get_order_ids(status='processing')
+            except Exception as e:
+                logger.error(f"Failed to fetch existing IDs: {e}")
             
             # Sync orders using OrderService (handles persistence correctly)
             try:
                 service = OrderService()
                 # We skip live check (check_stock=False) for speed in the scheduler background job
-                # The dashboard can do live checks when viewed
                 synced_orders = service.sync_orders(status='processing', check_stock=False)
                 
                 new_orders = []
                 for order in synced_orders:
-                    order_num = str(order.get('number'))
-                    if order_num not in existing_orders:
+                    # If order ID was NOT in DB before sync, it's new
+                    if order.get('id') not in existing_ids:
                         new_orders.append(order)
                 
                 # Notify about new orders

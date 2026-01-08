@@ -441,6 +441,27 @@ class Database:
                 """, (id, number, customer_id, status, date_created, total_amount, fulfillability))
                 return True  # Inserted
 
+    def order_exists(self, order_id: int) -> bool:
+        """Check if an order exists by ID."""
+        with self._connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(f"SELECT 1 FROM {ORDERS_TABLE} WHERE id = ?", (order_id,))
+            return cursor.fetchone() is not None
+
+
+
+    def get_order_ids(self, status: Optional[str] = None) -> set:
+        """Get all order IDs (optional status filter)."""
+        with self._connection() as conn:
+            cursor = conn.cursor()
+            query = f"SELECT id FROM {ORDERS_TABLE}"
+            params = []
+            if status:
+                query += " WHERE status = ?"
+                params.append(status)
+            cursor.execute(query, params)
+            return {row['id'] for row in cursor.fetchall()}
+
     def add_order_items(self, order_id: int, items: List[Dict[str, Any]]):
         """Add line items for an order (clears existing first)."""
         with self._connection() as conn:
