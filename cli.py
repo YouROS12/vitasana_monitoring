@@ -160,6 +160,27 @@ def cmd_optimize(args):
     print(f"\n[OK] Optimization complete. Saved {len(prefixes)} prefixes.")
 
 
+    print(f"\n[OK] Optimization complete. Saved {len(prefixes)} prefixes.")
+
+
+def cmd_analyze(args):
+    """Run Gold Mine analysis."""
+    from app.core.config import get_config
+    from app.core.logging import setup_logging
+    from app.analysis.engine import GoldMineAnalyzer
+    
+    config = get_config()
+    setup_logging(config.log_path, config.get('general', 'log_level', default='INFO'))
+    
+    print("[ANALYSIS] Running Gold Mine Analysis manually...")
+    try:
+        analyzer = GoldMineAnalyzer()
+        results = analyzer.run_full_analysis()
+        print(f"[OK] Analysis complete. Generated {len(results.get('periods', {}))} periods.")
+    except Exception as e:
+        print(f"[ERROR] Analysis failed: {e}")
+
+
 def cmd_schedule(args):
     """Run market scheduler."""
     from app.core.config import get_config
@@ -230,6 +251,11 @@ Examples:
     # Optimize command
     optimize_parser = subparsers.add_parser("optimize", help="Generate optimized search queries from DB")
     
+    # Analyze command
+    analyze_parser = subparsers.add_parser("analyze", help="Run Gold Mine analysis manually")
+    
+    # Schedule command
+    
     # Schedule command
     schedule_parser = subparsers.add_parser("schedule", help="Run periodic market monitoring")
     
@@ -252,6 +278,8 @@ Examples:
         cmd_scan(args)
     elif args.command == "optimize":
         cmd_optimize(args)
+    elif args.command == "analyze":
+        cmd_analyze(args)
     elif args.command == "schedule":
         cmd_schedule(args)
     else:
