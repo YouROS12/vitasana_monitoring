@@ -109,7 +109,13 @@ class GoldMineAnalyzer:
             selling_price = float(item.get('price') or 0)
             buying_price = float(item.get('final_price') or 0)
             stock = int(item.get('stock') or 0)
-            margin_mad = selling_price - buying_price
+            
+            # Sanity Check: If buying price is 0 (unknown), Margin is 0 (not Selling Price)
+            if buying_price <= 0.01:
+                margin_mad = 0.0
+            else:
+                margin_mad = selling_price - buying_price
+                
             daily_profit = velocity * margin_mad
             
             # Trend
