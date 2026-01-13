@@ -348,6 +348,17 @@ def run_monitoring(
                     result = future.result()
                     
                     if result['success']:
+                        # CRITICAL: Backfill pricing if missing (e.g., if only stock checked via search)
+                        if result['final_price'] is None or result['price'] is None:
+                            last_rec = db.get_last_record(result['sku'])
+                            if last_rec:
+                                if result['final_price'] is None:
+                                    result['final_price'] = last_rec.get('final_price')
+                                if result['price'] is None:
+                                    result['price'] = last_rec.get('price')
+                                if result['discount'] is None:
+                                    result['discount'] = last_rec.get('discount_percent')
+
                         # Save monitoring record
                         db.add_monitoring_record(
                             sku=result['sku'],

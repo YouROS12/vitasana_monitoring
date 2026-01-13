@@ -17,3 +17,9 @@ config.yaml
 # OS
 .DS_Store
 Thumbs.db
+
+# Archive (experimental code)
+archive/
+
+# Stale nested folder
+vitasana_monitoring/
